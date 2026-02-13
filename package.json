@@ -8,11 +8,10 @@
     "backend/agents/*"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:agents\"",
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\" \"npm run dev:agents\"",
     "dev:frontend": "cd frontend && npm run dev",
     "dev:backend": "cd backend/orchestrator && npm run dev",
     "dev:agents": "concurrently \"cd backend/agents/security && npm run dev\" \"cd backend/agents/data && npm run dev\" \"cd backend/agents/social && npm run dev\" \"cd backend/agents/price && npm run dev\" \"cd backend/agents/history && npm run dev\"",
-    "dev:all": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\" \"npm run dev:agents\"",
     "build": "npm run build:frontend && npm run build:backend",
     "build:frontend": "cd frontend && npm run build",
     "build:backend": "cd backend/orchestrator && npm run build"

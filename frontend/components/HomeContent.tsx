@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { AppConfig, UserSession, showConnect } from '@stacks/connect';
+import { AppConfig, UserSession } from '@stacks/connect';
 import IntelligenceRequest from '@/components/IntelligenceRequest';
 import ConsensusReport from '@/components/ConsensusReport';
 import AgentList from '@/components/AgentList';
@@ -22,18 +22,22 @@ export default function HomeContent() {
     }
   }, []);
 
-  const connectWallet = () => {
-    showConnect({
-      appDetails: {
-        name: 'AgentSwarm Intelligence',
-        icon: window.location.origin + '/favicon.ico'
-      },
-      onFinish: () => {
-        const data = userSession.loadUserData();
-        setUserData(data);
-      },
-      userSession
-    });
+  const connectWallet = async () => {
+    try {
+      const { authenticate } = await import('@stacks/connect');
+      authenticate({
+        appDetails: {
+          name: 'AgentSwarm Intelligence',
+          icon: window.location.origin + '/favicon.ico'
+        },
+        onFinish: (payload: any) => {
+          window.location.reload();
+        },
+        userSession
+      });
+    } catch (err) {
+      console.error('Wallet connection failed:', err);
+    }
   };
 
   const disconnectWallet = () => {
