@@ -72,24 +72,33 @@ export class PriceAnalyzer {
       headers['x-hiro-api-key'] = process.env.HIRO_API_KEY;
     }
 
-    // Fetch STX market data from CoinGecko - NO FAKE FALLBACKS
+    // Fetch extended STX market data from CoinGecko
     const cgResponse = await axios.get(
-      'https://api.coingecko.com/api/v3/simple/price?ids=blockstack&vs_currencies=usd&include_24hr_change=true&include_market_cap=true',
+      'https://api.coingecko.com/api/v3/coins/blockstack?localization=false&tickers=false&community_data=false&developer_data=false&sparkline=false',
       { timeout: 10000 }
     );
-    if (!cgResponse.data?.blockstack) {
-      throw new Error('CoinGecko returned no data for STX');
-    }
-    const stxPrice = cgResponse.data.blockstack.usd;
-    const stx24hChange = cgResponse.data.blockstack.usd_24h_change;
-    const stxMarketCap = cgResponse.data.blockstack.usd_market_cap;
-    console.log(`📊 CoinGecko REAL data: STX=$${stxPrice}, 24h=${stx24hChange?.toFixed(2)}%, MCap=$${stxMarketCap}`);
+    if (!cgResponse.data) throw new Error('CoinGecko returned no data for STX');
 
-    // Try to fetch contract transactions for activity analysis
+    const md = cgResponse.data.market_data;
+    const stxPrice = md?.current_price?.usd || 0;
+    const stx24hChange = md?.price_change_percentage_24h || 0;
+    const stx7dChange = md?.price_change_percentage_7d || 0;
+    const stx30dChange = md?.price_change_percentage_30d || 0;
+    const stxMarketCap = md?.market_cap?.usd || 0;
+    const stxVolume24h = md?.total_volume?.usd || 0;
+    const stxCirculatingSupply = md?.circulating_supply || 0;
+    const stxTotalSupply = md?.total_supply || 0;
+    const stxATH = md?.ath?.usd || 0;
+    const stxATHDate = md?.ath_date?.usd || '';
+    const stxATHChange = md?.ath_change_percentage?.usd || 0;
+
+    console.log(`📊 CoinGecko: STX=$${stxPrice} | 24h=${stx24hChange?.toFixed(2)}% | 7d=${stx7dChange?.toFixed(2)}% | MCap=$${(stxMarketCap / 1e9).toFixed(2)}B`);
+
+    // Fetch contract-specific transaction data
     const parts = address.split('.');
     const principal = parts[0];
+    const contractName = parts.length > 1 ? parts.slice(1).join('.') : null;
 
-    // Fetch REAL transaction data - NO RANDOM FALLBACKS
     const txResponse = await axios.get(
       `${this.STACKS_API}/extended/v1/address/${principal}/transactions?limit=50`,
       { timeout: 10000, headers }
@@ -97,20 +106,49 @@ export class PriceAnalyzer {
     const txs = txResponse.data?.results || [];
     const txCount = txResponse.data?.total || 0;
     
-    // Real volume from recent transactions
-    const recentVolume = txs.reduce((sum: number, tx: any) => {
-      return sum + (parseInt(tx.fee_rate) || 0);
-    }, 0);
-    console.log(`📊 Hiro REAL data: ${txCount} txs, volume=${recentVolume} for ${principal}`);
+    // Analyze fee patterns and transaction activity
+    let totalFees = 0;
+    let maxFee = 0;
+    let contractCallCount = 0;
+    const feeList: number[] = [];
+    
+    txs.forEach((tx: any) => {
+      const fee = parseInt(tx.fee_rate || '0');
+      totalFees += fee;
+      feeList.push(fee);
+      if (fee > maxFee) maxFee = fee;
+      if (tx.tx_type === 'contract_call') contractCallCount++;
+    });
+    
+    const avgFee = txs.length > 0 ? Math.round(totalFees / txs.length) : 0;
+    
+    // Calculate activity ratio (contract calls vs total)
+    const activityRatio = txs.length > 0 ? Math.round((contractCallCount / txs.length) * 100) : 0;
+
+    console.log(`📊 Hiro: ${txCount} txs, ${contractCallCount} calls, avg fee ${avgFee} for ${principal}`);
 
     return {
       stxPrice,
       stx24hChange,
+      stx7dChange,
+      stx30dChange,
       stxMarketCap,
+      stxVolume24h,
+      stxCirculatingSupply,
+      stxTotalSupply,
+      stxATH,
+      stxATHDate: stxATHDate ? new Date(stxATHDate).toISOString().split('T')[0] : null,
+      stxATHChange,
       txCount,
-      recentVolume,
-      volatilityIndex: Math.abs(stx24hChange) > 10 ? 'high' : Math.abs(stx24hChange) > 5 ? 'medium' : 'low',
+      contractCallCount,
+      activityRatio,
+      totalFeesSpent: totalFees,
+      avgFeePerTx: avgFee,
+      maxFee,
+      volatilityIndex: Math.abs(stx24hChange) > 15 ? 'extreme' : Math.abs(stx24hChange) > 10 ? 'high' : Math.abs(stx24hChange) > 5 ? 'moderate' : 'low',
+      priceFromATH: `${stxATHChange?.toFixed(1)}%`,
       contractAddress: address,
+      contractName: contractName,
       dataSource: 'coingecko+hiro'
     };
   }
@@ -119,32 +157,40 @@ export class PriceAnalyzer {
     const issues: Array<{severity: string; description: string}> = [];
     let score = 80;
 
-    // Volatility check
     const change24h = Math.abs(data.stx24hChange || 0);
     if (change24h > 20) {
-      issues.push({ severity: 'high', description: `Extreme 24h price volatility: ${data.stx24hChange?.toFixed(1)}%` });
+      issues.push({ severity: 'high', description: `Extreme 24h volatility: ${data.stx24hChange?.toFixed(1)}% - high risk of sudden price swings` });
       score -= 25;
     } else if (change24h > 10) {
-      issues.push({ severity: 'medium', description: `High 24h price change: ${data.stx24hChange?.toFixed(1)}%` });
+      issues.push({ severity: 'medium', description: `Elevated 24h movement: ${data.stx24hChange?.toFixed(1)}% indicates increased market uncertainty` });
       score -= 15;
     } else if (change24h > 5) {
-      issues.push({ severity: 'low', description: `Moderate price movement: ${data.stx24hChange?.toFixed(1)}%` });
+      issues.push({ severity: 'low', description: `Moderate 24h change: ${data.stx24hChange?.toFixed(1)}%` });
       score -= 5;
     }
 
-    // Activity check
+    const change7d = Math.abs(data.stx7dChange || 0);
+    if (change7d > 30) {
+      issues.push({ severity: 'high', description: `Severe 7-day swing: ${data.stx7dChange?.toFixed(1)}% - potential manipulation or major event` });
+      score -= 15;
+    }
+
     if (data.txCount < 10) {
-      issues.push({ severity: 'high', description: 'Very low trading activity - potential liquidity risk' });
+      issues.push({ severity: 'high', description: `Extremely low activity: only ${data.txCount} transactions - potential liquidity trap` });
       score -= 20;
     } else if (data.txCount < 50) {
-      issues.push({ severity: 'medium', description: 'Limited trading volume' });
+      issues.push({ severity: 'medium', description: `Limited activity: ${data.txCount} transactions - thin market` });
       score -= 10;
     }
 
-    // Pump-and-dump pattern check
     if (data.stx24hChange > 50) {
-      issues.push({ severity: 'critical', description: 'Potential pump-and-dump pattern: >50% increase in 24h' });
+      issues.push({ severity: 'critical', description: `Pump pattern detected: +${data.stx24hChange?.toFixed(1)}% in 24h - classic pump-and-dump indicator` });
       score -= 30;
+    }
+
+    if (data.stxATHChange < -90) {
+      issues.push({ severity: 'medium', description: `${data.stxATHChange?.toFixed(1)}% from ATH ($${data.stxATH?.toFixed(2)}) - deep decline territory` });
+      score -= 5;
     }
 
     return { score: Math.max(0, Math.min(100, score)), issues };
@@ -158,13 +204,16 @@ export class PriceAnalyzer {
   }
 
   private generateSummary(score: number, riskLevel: string, data: Record<string, any>, issues: Array<{description: string}>): string {
-    const priceStr = data.stxPrice ? `STX: $${data.stxPrice.toFixed(2)}` : '';
-    const changeStr = data.stx24hChange ? `(${data.stx24hChange > 0 ? '+' : ''}${data.stx24hChange.toFixed(1)}% 24h)` : '';
-    
-    if (issues.length === 0) {
-      return `Price analysis shows stable market conditions. ${priceStr} ${changeStr}. Score: ${score}/100.`;
+    const lines: string[] = [];
+    lines.push(`Market Analysis for ${data.contractName || data.contractAddress}`);
+    lines.push(`STX Price: $${data.stxPrice?.toFixed(4)} | 24h: ${data.stx24hChange > 0 ? '+' : ''}${data.stx24hChange?.toFixed(2)}% | 7d: ${data.stx7dChange > 0 ? '+' : ''}${data.stx7dChange?.toFixed(2)}% | 30d: ${data.stx30dChange > 0 ? '+' : ''}${data.stx30dChange?.toFixed(2)}%`);
+    lines.push(`Market Cap: $${(data.stxMarketCap / 1e6).toFixed(1)}M | 24h Volume: $${(data.stxVolume24h / 1e6).toFixed(1)}M | ATH: $${data.stxATH?.toFixed(2)} (${data.priceFromATH})`);
+    lines.push(`On-chain: ${data.txCount.toLocaleString()} txs, ${data.contractCallCount} contract calls, avg fee ${data.avgFeePerTx} microSTX`);
+    lines.push(`Volatility: ${data.volatilityIndex} | Score: ${score}/100 (${riskLevel})`);
+    if (issues.length > 0) {
+      lines.push(`Concerns: ${issues[0].description}`);
     }
-    return `Price analysis found ${issues.length} concern${issues.length > 1 ? 's' : ''} (Risk: ${riskLevel}). ${priceStr} ${changeStr}. Score: ${score}/100. ${issues[0].description}.`;
+    return lines.join('. ');
   }
 
 }

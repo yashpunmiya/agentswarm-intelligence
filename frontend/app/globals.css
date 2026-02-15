@@ -1,18 +1,33 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0e17;
-  --foreground: #e2e8f0;
-  --accent: #6366f1;
-  --accent-hover: #818cf8;
-  --surface: #111827;
-  --surface-light: #1e293b;
-  --border: #1e293b;
-  --muted: #64748b;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --danger: #ef4444;
-  --critical: #dc2626;
+  /* Stacks Brand Palette */
+  --background: #09090B;
+  --foreground: #FAFAFA;
+  --accent: #5546FF;
+  --accent-hover: #6B5FFF;
+  --accent-light: rgba(85, 70, 255, 0.12);
+  --surface: #0F0F14;
+  --surface-light: #18181F;
+  --surface-elevated: #1C1C26;
+  --border: #27272A;
+  --border-light: #3F3F46;
+  --border-accent: rgba(85, 70, 255, 0.25);
+  --muted: #71717A;
+  --muted-foreground: #A1A1AA;
+
+  --stacks-purple: #5546FF;
+  --stacks-orange: #FC6432;
+  --stacks-gradient: linear-gradient(135deg, #5546FF 0%, #FC6432 100%);
+
+  --success: #22C55E;
+  --success-light: rgba(34, 197, 94, 0.12);
+  --warning: #EAB308;
+  --warning-light: rgba(234, 179, 8, 0.12);
+  --danger: #F97316;
+  --danger-light: rgba(249, 115, 22, 0.12);
+  --critical: #EF4444;
+  --critical-light: rgba(239, 68, 68, 0.12);
 }
 
 @theme inline {
@@ -34,35 +49,168 @@ body {
   min-height: 100vh;
 }
 
-/* Glow effects */
-.glow-border {
-  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.15), 0 0 20px rgba(99, 102, 241, 0.05);
+/* Stacks-style card */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.card:hover {
+  border-color: var(--border-light);
+  box-shadow: 0 0 0 1px var(--border-light), 0 8px 32px rgba(0,0,0,0.3);
+}
+
+.card-glow {
+  background: var(--surface);
+  border: 1px solid var(--border-accent);
+  border-radius: 16px;
+  box-shadow: 0 0 20px rgba(85, 70, 255, 0.06);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card-glow:hover {
+  border-color: rgba(85, 70, 255, 0.4);
+  box-shadow: 0 0 30px rgba(85, 70, 255, 0.12);
+}
+
+/* Legacy compat */
+.glow-border { 
+  border: 1px solid var(--border-accent);
+  box-shadow: 0 0 20px rgba(85, 70, 255, 0.06);
+  border-radius: 16px;
+}
 .glow-border:hover {
-  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3), 0 0 30px rgba(99, 102, 241, 0.1);
+  border-color: rgba(85, 70, 255, 0.4);
+  box-shadow: 0 0 30px rgba(85, 70, 255, 0.12);
 }
 
-/* Smooth transitions */
 .transition-smooth {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Gradient text */
+/* Stacks gradient text */
 .gradient-text {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa);
+  background: var(--stacks-gradient);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* Pulse animation for loading */
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
-  50% { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0); }
+.gradient-text-purple {
+  background: linear-gradient(135deg, #5546FF, #8B7FFF);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
-.pulse-glow {
-  animation: pulse-glow 2s infinite;
+/* Gradient border effect */
+.gradient-border {
+  position: relative;
+  border-radius: 16px;
+  background: var(--surface);
+}
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 17px;
+  padding: 1px;
+  background: var(--stacks-gradient);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.4;
+  transition: opacity 0.3s;
+}
+.gradient-border:hover::before {
+  opacity: 0.7;
+}
+
+/* Pulse animation */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(85, 70, 255, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(85, 70, 255, 0); }
+}
+.pulse-glow { animation: pulse-glow 2s infinite; }
+
+/* Scan line animation for agents */
+@keyframes scan {
+  0% { transform: translateY(-100%); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+.scan-line {
+  animation: scan 2s ease-in-out infinite;
+}
+
+/* Stagger animation */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-in {
+  animation: fadeInUp 0.4s ease-out forwards;
+  opacity: 0;
+}
+
+/* Shimmer loading */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-light) 50%, var(--surface) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Score ring glow */
+.score-ring-low { filter: drop-shadow(0 0 6px rgba(34, 197, 94, 0.4)); }
+.score-ring-medium { filter: drop-shadow(0 0 6px rgba(234, 179, 8, 0.4)); }
+.score-ring-high { filter: drop-shadow(0 0 6px rgba(249, 115, 22, 0.4)); }
+.score-ring-critical { filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.4)); }
+
+/* Badge styles */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.badge-low { background: var(--success-light); color: var(--success); }
+.badge-medium { background: var(--warning-light); color: var(--warning); }
+.badge-high { background: var(--danger-light); color: var(--danger); }
+.badge-critical { background: var(--critical-light); color: var(--critical); }
+
+/* Mono text for addresses/hashes */
+.mono {
+  font-family: var(--font-mono), 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.8em;
+  letter-spacing: -0.02em;
+}
+
+/* Tx link style */
+.tx-link {
+  color: var(--stacks-purple);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.tx-link:hover {
+  color: var(--stacks-orange);
+  text-decoration: underline;
+}
+
+/* Grid background pattern */
+.grid-bg {
+  background-image: 
+    linear-gradient(rgba(85, 70, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(85, 70, 255, 0.03) 1px, transparent 1px);
+  background-size: 48px 48px;
 }
 

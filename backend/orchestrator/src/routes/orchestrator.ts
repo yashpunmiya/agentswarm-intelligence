@@ -117,8 +117,22 @@ orchestratorRouter.post('/request', async (req: Request, res: Response) => {
         const executionTime = Date.now() - startTime;
         agentRegistry.updateAgentReputation(bid.agentId, true, executionTime);
 
-        // Capture x402 payment info from response headers if available
+        // Decode x402 payment proof from response headers
         const paymentResponse = response.headers?.['payment-response'] || null;
+        let payment: any = null;
+        if (paymentResponse) {
+          try {
+            const decoded = JSON.parse(Buffer.from(paymentResponse, 'base64').toString());
+            payment = {
+              success: decoded.success,
+              payer: decoded.payer,
+              txHash: decoded.transaction,
+              network: decoded.network,
+              explorerUrl: `https://explorer.hiro.so/txid/${decoded.transaction}?chain=testnet`
+            };
+            console.log(`  ✅ ${bid.agentName} paid: ${decoded.transaction.slice(0, 16)}...`);
+          } catch {}
+        }
         
         return {
           agentId: bid.agentId,
@@ -131,7 +145,7 @@ orchestratorRouter.post('/request', async (req: Request, res: Response) => {
             ...response.data.metadata,
             price: bid.price,
             paidViaX402: useRealPayments,
-            paymentResponse: paymentResponse
+            payment: payment
           },
           executionTime
         } as AgentResponse;
@@ -239,6 +253,20 @@ orchestratorRouter.post('/request-paid', async (req: Request, res: Response) => 
         const executionTime = Date.now() - startTime;
         agentRegistry.updateAgentReputation(bid.agentId, true, executionTime);
         const paymentResponse = response.headers?.['payment-response'] || null;
+        let payment: any = null;
+        if (paymentResponse) {
+          try {
+            const decoded = JSON.parse(Buffer.from(paymentResponse, 'base64').toString());
+            payment = {
+              success: decoded.success,
+              payer: decoded.payer,
+              txHash: decoded.transaction,
+              network: decoded.network,
+              explorerUrl: `https://explorer.hiro.so/txid/${decoded.transaction}?chain=testnet`
+            };
+            console.log(`  ✅ ${bid.agentName} paid: ${decoded.transaction.slice(0, 16)}...`);
+          } catch {}
+        }
 
         return {
           agentId: bid.agentId,
@@ -251,7 +279,7 @@ orchestratorRouter.post('/request-paid', async (req: Request, res: Response) => 
             ...response.data.metadata,
             price: bid.price,
             paidViaX402: true,
-            paymentResponse
+            payment: payment
           },
           executionTime
         } as AgentResponse;
