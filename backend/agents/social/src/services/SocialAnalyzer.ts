@@ -16,14 +16,14 @@ export class SocialAnalyzer {
     const startTime = Date.now();
 
     try {
-      // Attempt AI-powered sentiment analysis via Gemini
-      if (this.GEMINI_API_KEY) {
-        return await this.aiSentimentAnalysis(tokenIdentifier, startTime);
+      // Require AI-powered sentiment analysis via Gemini
+      if (!this.GEMINI_API_KEY) {
+        throw new Error('GEMINI_API_KEY not configured - cannot perform social sentiment analysis');
       }
-      return this.patternBasedAnalysis(tokenIdentifier, startTime);
+      return await this.aiSentimentAnalysis(tokenIdentifier, startTime);
     } catch (error: any) {
-      console.log('AI sentiment analysis failed, using pattern-based:', error.message);
-      return this.patternBasedAnalysis(tokenIdentifier, startTime);
+      console.error('❌ AI sentiment analysis failed:', error.message);
+      throw new Error(`Social sentiment analysis failed: ${error.message}`);
     }
   }
 
@@ -36,28 +36,37 @@ export class SocialAnalyzer {
     - scamIndicators (array of strings)
     Keep the analysis brief and factual.`;
 
-    const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.GEMINI_API_KEY}`,
-      {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 500 }
-      },
-      { timeout: 15000 }
-    );
-
-    const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    
-    // Parse AI response
-    let parsed: any = {};
-    try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsed = JSON.parse(jsonMatch[0]);
+    // Retry with exponential backoff for rate limiting
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        const delay = Math.pow(2, attempt) * 2000; // 4s, 8s
+        console.log(`⏳ Gemini rate limited, retrying in ${delay/1000}s (attempt ${attempt + 1}/3)...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-    } catch {
-      // Fall back to pattern analysis if parsing fails
-      return this.patternBasedAnalysis(token, startTime);
-    }
+      try {
+        const response = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${this.GEMINI_API_KEY}`,
+          {
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.3, maxOutputTokens: 500 }
+          },
+          { timeout: 15000 }
+        );
+
+        const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        console.log(`🤖 Gemini REAL response received (${text.length} chars)`);
+        
+        // Parse AI response
+        let parsed: any = {};
+        try {
+          const jsonMatch = text.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            parsed = JSON.parse(jsonMatch[0]);
+          }
+        } catch {
+          throw new Error('Failed to parse AI sentiment analysis response');
+        }
 
     const sentimentScore = Math.min(100, Math.max(0, parsed.sentimentScore || 50));
     const redFlags: string[] = parsed.redFlags || [];
@@ -83,56 +92,14 @@ export class SocialAnalyzer {
       },
       scanTime
     };
-  }
-
-  private patternBasedAnalysis(token: string, startTime: number): SocialResult {
-    const issues: string[] = [];
-    let score = 75;
-
-    // Common scam name patterns
-    const scamPatterns = ['moon', 'safe', 'elon', 'doge', 'shib', 'baby', 'inu', '100x', '1000x', 'gem'];
-    const lowerToken = token.toLowerCase();
-    
-    const matchedPatterns = scamPatterns.filter(p => lowerToken.includes(p));
-    if (matchedPatterns.length > 0) {
-      issues.push(`Token name contains common scam keywords: ${matchedPatterns.join(', ')}`);
-      score -= matchedPatterns.length * 12;
+      } catch (err: any) {
+        lastError = err;
+        if (err.response?.status !== 429) {
+          throw err; // Only retry on rate limit
+        }
+      }
     }
-
-    // Check for excessive special characters (common in scams)
-    const specialCharCount = (token.match(/[^a-zA-Z0-9.-]/g) || []).length;
-    if (specialCharCount > 3) {
-      issues.push('Unusual characters in token identifier');
-      score -= 10;
-    }
-
-    // Check length patterns
-    if (token.length < 10) {
-      issues.push('Very short token identifier - limited analysis possible');
-      score -= 5;
-    }
-
-    // Deterministic variance based on token hash
-    const hash = token.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    score += (hash % 15) - 7;
-    score = Math.max(10, Math.min(95, score));
-
-    const riskLevel = this.determineRiskLevel(score, issues);
-    const scanTime = Date.now() - startTime;
-
-    return {
-      score,
-      riskLevel,
-      issues,
-      summary: `Pattern-based social analysis: Score ${score}/100. ${issues.length > 0 ? issues[0] : 'No obvious social red flags detected.'}`,
-      details: {
-        communityHealth: score >= 70 ? 'moderate' : 'weak',
-        sentimentSource: 'pattern-analysis',
-        checksPerformed: 4,
-        contractAddress: token
-      },
-      scanTime
-    };
+    throw lastError || new Error('Gemini API failed after 3 retries');
   }
 
   private determineRiskLevel(score: number, issues: string[]): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {

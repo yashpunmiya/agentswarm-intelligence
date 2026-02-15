@@ -16,7 +16,9 @@ export class HistoryAnalyzer {
     const startTime = Date.now();
 
     try {
-      const walletData = await this.fetchWalletHistory(creatorAddress);
+      // Resolve tx hashes to addresses
+      const resolvedAddress = await this.resolveAddress(creatorAddress);
+      const walletData = await this.fetchWalletHistory(resolvedAddress);
       const { score, issues } = this.evaluateHistory(walletData);
       const riskLevel = this.determineRiskLevel(score);
       const scanTime = Date.now() - startTime;
@@ -26,13 +28,31 @@ export class HistoryAnalyzer {
         riskLevel,
         issues: issues.map(i => i.description),
         summary: this.generateSummary(score, riskLevel, walletData, issues),
-        details: { ...walletData, checksPerformed: 5 },
+        details: { ...walletData, checksPerformed: 5, resolvedFrom: creatorAddress !== resolvedAddress ? creatorAddress : undefined },
         scanTime
       };
     } catch (error: any) {
-      console.log('History fetch failed, using heuristic:', error.message);
-      return this.getHeuristicAnalysis(creatorAddress, Date.now() - startTime);
+      console.error('❌ History fetch failed:', error.message);
+      throw new Error(`History analysis failed for ${creatorAddress}: ${error.message}`);
     }
+  }
+
+  private async resolveAddress(address: string): Promise<string> {
+    const headers: Record<string, string> = {};
+    if (process.env.HIRO_API_KEY) headers['x-hiro-api-key'] = process.env.HIRO_API_KEY;
+
+    if (address.startsWith('0x') && address.length === 66) {
+      console.log(`🔍 Resolving tx hash: ${address}`);
+      const txRes = await axios.get(`${this.STACKS_API}/extended/v1/tx/${address}`, { timeout: 10000, headers });
+      // For history, we want the sender (creator) address
+      const sender = txRes.data?.sender_address;
+      if (sender) {
+        console.log(`✅ Resolved to creator: ${sender}`);
+        return sender;
+      }
+      throw new Error(`Cannot resolve tx ${address} to a creator address`);
+    }
+    return address;
   }
 
   private async fetchWalletHistory(address: string): Promise<Record<string, any>> {
@@ -46,19 +66,20 @@ export class HistoryAnalyzer {
 
     const [balanceRes, txRes, contractsRes] = await Promise.all([
       axios.get(`${this.STACKS_API}/extended/v1/address/${principal}/balances`, {
-        timeout: 8000, headers
-      }).catch(() => null),
+        timeout: 10000, headers
+      }),
       axios.get(`${this.STACKS_API}/extended/v1/address/${principal}/transactions?limit=50`, {
-        timeout: 8000, headers
-      }).catch(() => null),
+        timeout: 10000, headers
+      }),
       axios.get(`${this.STACKS_API}/extended/v1/address/${principal}/assets`, {
-        timeout: 8000, headers
-      }).catch(() => null)
+        timeout: 10000, headers
+      }).catch(() => null)  // assets endpoint may not exist for all addresses
     ]);
 
     const stxBalance = parseInt(balanceRes?.data?.stx?.balance || '0');
     const txs = txRes?.data?.results || [];
     const totalTxCount = txRes?.data?.total || 0;
+    console.log(`📜 HistoryAgent REAL data: balance=${stxBalance}, txCount=${totalTxCount}, recentTxs=${txs.length} for ${principal}`);
     
     // Analyze transaction patterns
     const contractDeployments = txs.filter((tx: any) => tx.tx_type === 'smart_contract');
@@ -147,22 +168,4 @@ export class HistoryAnalyzer {
     return `Creator history analysis (Risk: ${riskLevel}): Wallet ${age} days old with ${txCount} transactions. Score: ${score}/100. ${issues[0].description}.`;
   }
 
-  private getHeuristicAnalysis(address: string, elapsed: number): HistoryResult {
-    const hash = address.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    const score = 55 + (hash % 35);
-    const riskLevel = score >= 75 ? 'LOW' : score >= 55 ? 'MEDIUM' : 'HIGH';
-    const issues = [
-      'Unable to fully verify wallet history',
-      'Limited historical data available'
-    ].slice(0, (hash % 2) + 1);
-
-    return {
-      score,
-      riskLevel: riskLevel as HistoryResult['riskLevel'],
-      issues,
-      summary: `Heuristic history analysis for ${address}: Score ${score}/100. ${issues[0]}.`,
-      details: { mode: 'heuristic', contractAddress: address, checksPerformed: 5 },
-      scanTime: elapsed || 500
-    };
-  }
 }

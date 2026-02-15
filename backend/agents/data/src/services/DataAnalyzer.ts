@@ -16,7 +16,9 @@ export class DataAnalyzer {
     const startTime = Date.now();
 
     try {
-      const metrics = await this.fetchOnChainMetrics(tokenAddress);
+      // Resolve tx hashes to contract addresses
+      const resolvedAddress = await this.resolveAddress(tokenAddress);
+      const metrics = await this.fetchOnChainMetrics(resolvedAddress);
       const { score, issues } = this.evaluateMetrics(metrics);
       const riskLevel = this.determineRiskLevel(score);
       const scanTime = Date.now() - startTime;
@@ -26,13 +28,34 @@ export class DataAnalyzer {
         riskLevel,
         issues: issues.map(i => i.description),
         summary: this.generateSummary(score, riskLevel, metrics, issues),
-        details: { ...metrics, checksPerformed: 6 },
+        details: { ...metrics, checksPerformed: 6, resolvedFrom: tokenAddress !== resolvedAddress ? tokenAddress : undefined },
         scanTime
       };
     } catch (error: any) {
-      console.log('On-chain data fetch failed, using heuristic:', error.message);
-      return this.getHeuristicAnalysis(tokenAddress, Date.now() - startTime);
+      console.error('❌ On-chain data fetch failed:', error.message);
+      throw new Error(`Data analysis failed for ${tokenAddress}: ${error.message}`);
     }
+  }
+
+  private async resolveAddress(address: string): Promise<string> {
+    const headers: Record<string, string> = {};
+    if (process.env.HIRO_API_KEY) headers['x-hiro-api-key'] = process.env.HIRO_API_KEY;
+
+    if (address.startsWith('0x') && address.length === 66) {
+      console.log(`🔍 Resolving tx hash: ${address}`);
+      const txRes = await axios.get(`${this.STACKS_API}/extended/v1/tx/${address}`, { timeout: 10000, headers });
+      const contractId = txRes.data?.smart_contract?.contract_id;
+      if (contractId) {
+        console.log(`✅ Resolved to contract: ${contractId}`);
+        return contractId;
+      }
+      const calledContract = txRes.data?.contract_call?.contract_id;
+      if (calledContract) return calledContract;
+      const sender = txRes.data?.sender_address;
+      if (sender) return sender;
+      throw new Error(`Cannot resolve tx ${address} to a Stacks address`);
+    }
+    return address;
   }
 
   private async fetchOnChainMetrics(address: string): Promise<Record<string, any>> {
@@ -48,16 +71,17 @@ export class DataAnalyzer {
     try {
       const [accountInfo, txHistory] = await Promise.all([
         axios.get(`${this.STACKS_API}/extended/v1/address/${principal}/balances`, {
-          timeout: 8000, headers
-        }).catch(() => null),
+          timeout: 10000, headers
+        }),
         axios.get(`${this.STACKS_API}/extended/v1/address/${principal}/transactions?limit=20`, {
-          timeout: 8000, headers
-        }).catch(() => null)
+          timeout: 10000, headers
+        })
       ]);
 
       const stxBalance = accountInfo?.data?.stx?.balance || '0';
       const txCount = txHistory?.data?.total || 0;
       const recentTxs = txHistory?.data?.results || [];
+      console.log(`📊 DataAgent REAL data: balance=${stxBalance}, txCount=${txCount}, recentTxs=${recentTxs.length} for ${principal}`);
 
       return {
         stxBalance: parseInt(stxBalance),
@@ -116,22 +140,4 @@ export class DataAnalyzer {
     return `Data analysis found ${issues.length} concern${issues.length > 1 ? 's' : ''} (Risk: ${riskLevel}). Score: ${score}/100. ${txCount} total transactions. ${issues[0].description}.`;
   }
 
-  private getHeuristicAnalysis(address: string, elapsed: number): DataResult {
-    const hash = address.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-    const score = 55 + (hash % 35);
-    const riskLevel = score >= 80 ? 'LOW' : score >= 60 ? 'MEDIUM' : 'HIGH';
-    const issues = [
-      'Limited on-chain data available',
-      'Unable to verify holder distribution'
-    ].slice(0, (hash % 2) + 1);
-
-    return {
-      score,
-      riskLevel: riskLevel as DataResult['riskLevel'],
-      issues,
-      summary: `Heuristic data analysis for ${address}: Score ${score}/100. ${issues[0]}.`,
-      details: { mode: 'heuristic', contractAddress: address, checksPerformed: 6 },
-      scanTime: elapsed || 400
-    };
-  }
 }

@@ -16,7 +16,9 @@ export class SecurityAnalyzer {
     const startTime = Date.now();
     
     try {
-      const contractData = await this.fetchContractSource(contractAddress);
+      // Resolve tx hashes to contract addresses
+      const resolvedAddress = await this.resolveAddress(contractAddress);
+      const contractData = await this.fetchContractSource(resolvedAddress);
       const issues = this.runSecurityChecks(contractData);
       const score = this.calculateScore(issues);
       const riskLevel = this.determineRiskLevel(score, issues);
@@ -32,15 +34,39 @@ export class SecurityAnalyzer {
           criticalIssues: issues.filter(i => i.severity === 'critical').length,
           highIssues: issues.filter(i => i.severity === 'high').length,
           mediumIssues: issues.filter(i => i.severity === 'medium').length,
-          contractAddress
+          contractAddress: resolvedAddress,
+          resolvedFrom: contractAddress !== resolvedAddress ? contractAddress : undefined
         },
         scanTime
       };
 
     } catch (error: any) {
-      console.log('Contract fetch failed, using heuristic analysis:', error.message);
-      return this.getHeuristicAnalysis(contractAddress, Date.now() - startTime);
+      console.error('❌ Contract fetch failed:', error.message);
+      throw new Error(`Security analysis failed for ${contractAddress}: ${error.message}`);
     }
+  }
+
+  private async resolveAddress(address: string): Promise<string> {
+    const headers: Record<string, string> = {};
+    if (process.env.HIRO_API_KEY) headers['x-hiro-api-key'] = process.env.HIRO_API_KEY;
+
+    // If it's a tx hash (0x...), look up the transaction to find the contract
+    if (address.startsWith('0x') && address.length === 66) {
+      console.log(`🔍 Resolving tx hash to contract: ${address}`);
+      const txRes = await axios.get(`${this.STACKS_API}/extended/v1/tx/${address}`, { timeout: 10000, headers });
+      const contractId = txRes.data?.smart_contract?.contract_id;
+      if (contractId) {
+        console.log(`✅ Resolved to contract: ${contractId}`);
+        return contractId;
+      }
+      const calledContract = txRes.data?.contract_call?.contract_id;
+      if (calledContract) {
+        console.log(`✅ Resolved to called contract: ${calledContract}`);
+        return calledContract;
+      }
+      throw new Error(`Transaction ${address} has no associated smart contract for security analysis`);
+    }
+    return address;
   }
 
   private async fetchContractSource(address: string): Promise<string> {
@@ -143,34 +169,4 @@ export class SecurityAnalyzer {
     return `Security analysis reveals ${issueCount} potential issue${issueCount > 1 ? 's' : ''} (Risk: ${riskLevel}). Score: ${score}/100. Key concerns: ${issues.slice(0, 2).map(i => i.description).join('; ')}.`;
   }
 
-  private getHeuristicAnalysis(address: string, elapsed: number): SecurityResult {
-    const hash = address.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const score = 50 + (hash % 40);
-    
-    const possibleIssues = [
-      'No maximum supply cap detected',
-      'Centralized admin control detected',
-      'Contract has pausable functions',
-      'Potential reentrancy vulnerability',
-      'Unguarded STX transfers detected'
-    ];
-    const issues = possibleIssues.slice(0, (hash % 3) + 1);
-    const riskLevel = score >= 80 ? 'LOW' : score >= 60 ? 'MEDIUM' : 'HIGH';
-
-    return {
-      score,
-      riskLevel: riskLevel as SecurityResult['riskLevel'],
-      issues,
-      summary: `Heuristic analysis for ${address}: Score ${score}/100 with ${issues.length} potential issues. ${issues[0]}.`,
-      details: {
-        checksPerformed: 5,
-        criticalIssues: 0,
-        highIssues: issues.length,
-        mediumIssues: 0,
-        mode: 'heuristic',
-        contractAddress: address
-      },
-      scanTime: elapsed || 500
-    };
-  }
 }
