@@ -165,16 +165,3 @@ SERVER_ADDRESS=<stx-address>
 
 The orchestrator additionally has agent endpoint URLs and platform configuration.
 
-## 📹 Demo Video
-
-[Link to demo video]
-
-## 🌐 Live Demo
-
-[Link to deployed frontend]
-
-## 👥 Team
-
-Solo developer submission
-
-Built for **x402 Stacks Challenge 2026**
